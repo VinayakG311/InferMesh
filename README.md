@@ -1,195 +1,170 @@
-# Distributed Inference Engine — Single Node Baseline
+<div align="center">
 
-A local AI inference setup running **Llama 3.2 3B** on your MacBook M4
-via Ollama, with a simple chat UI to interact with it.
+<br/>
 
----
+<img src="https://img.shields.io/badge/InferMesh-Distributed%20AI%20Inference%20Scheduler-6366f1?style=for-the-badge&labelColor=0f0f0f" />
 
-## Prerequisites
+<br/><br/>
 
-- macOS with Apple Silicon (M1/M2/M3/M4)
-- Python 3.11 or higher
-- ~3 GB of free disk space for the model
+**Route intelligently. Recover automatically. Scale without friction.**
 
-Check your Python version:
+*An open-source distributed inference scheduler for self-hosted LLMs.*
 
-```bash
-python3 --version
-```
+<br/>
 
----
+[![Python](https://img.shields.io/badge/Python_3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![OpenAI Compatible](https://img.shields.io/badge/OpenAI_API-Compatible-412991?style=flat-square&logo=openai&logoColor=white)](https://platform.openai.com/docs/api-reference)
+[![License: MIT](https://img.shields.io/badge/License-MIT-f59e0b?style=flat-square)](LICENSE)
 
-## Step 1 — Install Ollama
+<br/>
 
-Ollama is the tool that downloads and runs the LLM locally using Metal (Apple GPU).
-
-```bash
-# Download and install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
-```
-
-Or download the macOS app directly from [https://ollama.com/download/mac](https://ollama.com/download/mac) and drag it to Applications.
-
-Verify it installed correctly:
-
-```bash
-ollama --version
-```
+</div>
 
 ---
 
-## Step 2 — Download the Model
+## The Problem
 
-Pull Llama 3.2 3B (quantized to 4-bit — uses ~2 GB of memory):
+Self-hosted LLM deployments are single points of failure. One node, one model, one GPU. When it's busy — requests queue. When it's down — requests fail. Scaling means manually load balancing, manually tracking node health, manually handling failover.
 
-```bash
-ollama pull llama3.2:3b
-```
-
-This will take a few minutes depending on your internet speed.
-You only need to do this once — the model is cached locally after the first pull.
-
-Verify the model is available:
-
-```bash
-ollama list
-```
-
-You should see `llama3.2:3b` in the output.
+**InferMesh eliminates all of that.**
 
 ---
 
-## Step 3 — Start Ollama
+## How It Works
 
-Start the Ollama server in the background:
-
-```bash
-ollama serve
+```
+  Your App  ──►  InferMesh Router  ──►  Best Available Node
+                      │
+               scores every node
+               on every request
+                      │
+              ┌───────┼───────┐
+              ▼       ▼       ▼
+           Node A   Node B  OpenRouter
+           (local)  (local)  (fallback)
 ```
 
-Keep this terminal open (or run it in the background).
-Ollama listens on `http://localhost:11434` by default.
-
-To test that it's working:
-
-```bash
-curl http://localhost:11434/api/tags
-```
-
-You should see a JSON response listing your downloaded models.
+A lightweight proxy runs on each inference node. The router sits in front, continuously monitoring every node's health and load. Every incoming request is scored in real time — the best node wins. No manual intervention. No single point of failure.
 
 ---
 
-## Step 4 — Set Up the Python Environment
+## Features
 
-Navigate to this project folder and create a virtual environment:
+<br/>
 
-```bash
-cd inference-engine
+### 📡 &nbsp; Zero-Config Peer Discovery
 
-# Create a virtual environment
-python3 -m venv venv
+Nodes find each other over UDP gossip broadcast. Start a new node and it joins the mesh within seconds. Kill a node and it's evicted automatically. No service registry. No Consul. No etcd. No config changes.
 
-# Activate it
-source venv/bin/activate
+<br/>
+
+### ⚡ &nbsp; Real-Time Intelligent Routing
+
+Every request is scored against all live nodes across three signals simultaneously:
+
+```
+score  =  ( latency_ms × 1.0 )  +  ( queue_depth × 200 )  +  ( active_requests × 150 )
 ```
 
-Install the required Python packages:
+The node with the lowest score serves the request. Weights are fully tunable — bias toward speed, load distribution, or a balance of both.
 
-```bash
-pip install -r requirements.txt
-```
+<br/>
+
+### 🔁 &nbsp; Automatic Failover
+
+If a chosen node fails mid-request, InferMesh retries on the next best available node transparently. The client never sees an error. Only when every node in the cluster fails does the router return a `503`.
+
+<br/>
+
+### ☁️ &nbsp; Cloud Spillover via OpenRouter
+
+Configure OpenRouter as a remote fallback peer. It receives traffic only when all local nodes are saturated — enforced via a configurable latency penalty in the scoring function. One config line. No code touched.
+
+<br/>
+
+### 🛡️ &nbsp; Admission Control
+
+Each node runs a bounded admission queue. Requests that exceed node capacity receive an immediate `429` instead of hanging indefinitely. Queue size and concurrency limits are set per-node via environment variables.
+
+<br/>
+
+### 📊 &nbsp; Prometheus Metrics on Every Node
+
+| Metric | Description |
+|--------|-------------|
+| `proxy_inference_requests_total` | Request outcomes — success, error, rejected |
+| `proxy_time_to_first_token_seconds` | TTFT histogram per node |
+| `proxy_request_duration_seconds` | Full end-to-end latency |
+| `proxy_queue_depth` | Live requests waiting for a slot |
+| `proxy_active_requests` | Live requests currently running |
+
+<br/>
+
+### 🔌 &nbsp; Drop-In OpenAI API Compatibility
+
+InferMesh exposes the standard `/v1/chat/completions` interface. Any existing OpenAI client points at the router with zero modification. Streaming and blocking modes both supported.
+
+<br/>
 
 ---
 
-## Step 5 — Start the FastAPI Proxy
-
-Start the proxy in a second terminal while Ollama is still running:
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-The proxy listens on `http://localhost:8000` and forwards chat requests to
-Ollama on `http://localhost:11434`.
-
-Useful proxy endpoints:
-
-```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/health/ready
-curl http://localhost:8000/node/info
-curl http://localhost:8000/metrics
-```
-
-The proxy has a small request queue in front of Ollama. If the queue is full,
-it returns `429 Proxy overloaded` so a routing layer can try another node later.
-
----
-
-## Step 6 — Run the Chat UI
-
-```bash
-python chat.py
-```
-
-A chat interface will open in your terminal.
-Type your message and press Enter to chat with the model.
-Type `exit` or `quit` to stop.
-
----
-
-## Project Structure
+## Architecture
 
 ```
 inference-engine/
-├── README.md           # This file
-├── requirements.txt    # Python dependencies
-├── chat.py             # Terminal chat UI (start here)
-└── app/
-    ├── __init__.py
-    └── main.py         # FastAPI proxy server
+│
+├── app/                    # Proxy — one instance per node
+│   └── main.py             # Queue · Metrics · Health · Node info
+│
+└── router/                 # Scheduler — single cluster entry point
+    ├── peers.py            # Peer registry — discovery + health polling
+    ├── gossip.py           # UDP gossip — announce · listen · evict
+    ├── scorer.py           # Weighted scoring — picks the best node
+    ├── forwarder.py        # Request forwarding + stream relay
+    ├── openrouter.py       # Remote spillover adapter
+    └── config.yaml         # Single file controls the entire cluster
 ```
+
+Each component has exactly one responsibility. Swap the scoring algorithm without touching discovery. Replace gossip with a service registry without touching the router. The separation is intentional and maintained.
 
 ---
 
-## Troubleshooting
+## Designed For
 
-`**ollama: command not found**`
-Restart your terminal after installing Ollama, or run:
-
-```bash
-export PATH=$PATH:/usr/local/bin
-```
-
-`**Error: model not found**`
-Run `ollama pull llama3.2:3b` again and wait for it to complete fully.
-
-`**Connection refused` on port 11434**
-Ollama isn't running. Open a new terminal and run `ollama serve`.
-
-`**Connection refused` on port 8000**
-The proxy isn't running. Open a new terminal and run:
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-**Model responds very slowly**
-Make sure no other heavy apps (browser, Xcode) are competing for memory.
-The model needs ~2 GB of unified memory to run smoothly.
-
-`**python3: command not found`**
-Install Python from [https://www.python.org/downloads/macos/](https://www.python.org/downloads/macos/)
+- Teams running **self-hosted LLMs** who need resilience without Kubernetes overhead
+- **AI infrastructure engineers** building on top of Ollama, llama.cpp, or vLLM
+- **Researchers and hobbyists** who want production-grade routing on consumer hardware
+- Anyone who wants to stop babysitting GPU nodes
 
 ---
 
-## What's Next
+## Roadmap
 
-Once this proxy setup is working, the next step is to:
+| Status | Item |
+|--------|------|
+| ✅ | Weighted multi-signal scoring router |
+| ✅ | UDP gossip peer discovery |
+| ✅ | Automatic failover with retry |
+| ✅ | OpenRouter remote spillover |
+| ✅ | Prometheus metrics per node |
+| ✅ | OpenAI-compatible API surface |
+| ⬜ | Grafana dashboard |
+| ⬜ | Multi-machine deployment (cloud VMs) |
+| ⬜ | mTLS inter-node authentication |
+| ⬜ | KV-cache prefix sharing |
+| ⬜ | Request hedging for P99 latency |
 
-1. Run two proxy instances on different ports to simulate two nodes
-2. Build the routing layer that polls `/health/ready` and `/node/info`
-3. Score nodes using queue depth, latency, and request metrics
+---
 
-Stay on this step until the chat UI works smoothly end-to-end.
+<div align="center">
+
+<br/>
+
+**MIT Licensed &nbsp;·&nbsp; Built with Python, FastAPI, and Ollama**
+
+*Contributions welcome — one concern per PR.*
+
+<br/>
+
+</div>
