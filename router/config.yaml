@@ -1,0 +1,32 @@
+# Router configuration.
+
+router:
+  host: "0.0.0.0"
+  port: 9000
+  health_check_interval: 5   # how often (seconds) to poll each peer's health
+
+# Gossip settings — controls how nodes discover each other automatically.
+# Each router instance broadcasts itself on this UDP port so other routers
+# can find it without any manual config changes.
+gossip:
+  enabled: true              # set to false to fall back to the static peer list below
+  port: 6000                 # UDP port used for gossip broadcasts
+  announce_interval: 4       # how often (seconds) this node broadcasts itself
+  peer_timeout: 15           # seconds of silence before a peer is considered dead
+
+# Static peer list — only used when gossip.enabled is false.
+# When gossip is on, peers discover each other automatically and this is ignored.
+peers:
+  - id: "node-a"
+    url: "http://localhost:8000"
+  - id: "node-b"
+    url: "http://localhost:8001"
+
+# OpenRouter spillover — always configured separately from local peers.
+# The router treats it as a last-resort peer with a built-in latency penalty
+# so local nodes are always preferred when they are alive.
+openrouter:
+  enabled: false             # set to true to activate
+  api_key: ""                # or set OPENROUTER_API_KEY env var
+  model: "meta-llama/llama-3.2-3b-instruct:free"  # free-tier Llama model on OpenRouter
+  base_latency_ms: 800       # scoring penalty — keeps local nodes preferred
